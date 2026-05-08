@@ -31,10 +31,10 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_KEY }}
           port: 22
           source: "target/*.war"
-          target: "/home/ec2-user/deploy-temp"
+          target: "/home/ec2-user"
 
       - name: Deploy to Tomcat
         uses: appleboy/ssh-action@v1.0.3
@@ -44,12 +44,10 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           port: 22
           script: |
-            sudo mkdir -p /opt/tomcat/webapps
 
-            sudo rm -f /opt/tomcat/webapps/ROOT.war
+            sudo mv /home/ec2-user//target/*.war /var/lib/tomcat10/webapps
 
-            sudo mv /home/ec2-user/deploy-temp/target/*.war /opt/tomcat/webapps/ROOT.war
 
-            sudo systemctl restart tomcat
+            sudo systemctl restart tomcat10
 
-            sudo systemctl status tomcat --no-pager
+            sudo systemctl status tomcat10 --no-pager
