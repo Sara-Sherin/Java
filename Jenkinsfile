@@ -11,7 +11,7 @@ pipeline {
 
         stage('docker build') {
             steps {
-                sh 'sudo docker build -t sara:latest -f /home/ec2-user/Dockerfile.'
+                sh 'sudo docker build -t sara:latest -f /home/ec2-user/Dockerfile .'
             }
         }
 
