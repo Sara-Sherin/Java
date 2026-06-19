@@ -1,48 +1,81 @@
 pipeline {
     agent any
 
-     stages {
+    environment {
+        DOCKER_IMAGE = "sara567/helloworld"
+        // Using BUILD_NUMBER for unique tagging to trigger K8s rollouts
+        DOCKER_TAG   = "${env.BUILD_NUMBER}" 
+        K8S_MASTER   = "172.31.12.109"
+        K8S_USER     = "ec2-user"
+    }
 
-        stage('maven build') {
+    stages {
+        stage('Checkout') {
             steps {
-                sh 'sudo mvn clean install'
+                git branch: 'main', url: 'https://github.com/Sara-Sherin/Java.git'
             }
         }
 
-        stage('docker build') {
+        stage('Build Artifact') {
             steps {
-                sh 'sudo docker build -t sara:latest -f /home/ec2-user/Dockerfile .'
+                // Assumes Maven is installed on the agent
+                sh 'mvn clean package'
             }
         }
 
-        stage('Docker Login & Push') {
+        stage('Docker Build & Tag') {
+            steps {
+                sh """
+                docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Push to Docker Hub') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 'docker-hub',
+                    credentialsId: 'DockerToken',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-
-                    sh '''
-                        echo "$DOCKER_PASS" | sudo docker login -u "$DOCKER_USER" --password-stdin
-
-                        sudo docker tag sara:latest sara567/sara:latest
-
-                        sudo docker push sara567/sara:latest
-                    '''
+                    sh """
+                    echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker push ${DOCKER_IMAGE}:latest
+                    """
                 }
             }
         }
 
-        stage('Run Ansible Playbook via SSH') {
+        stage('Deploy to minikube') {
             steps {
-                sshagent(['sarasherin']) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no ansible@172.31.4.175 "ansible-playbook /home/ansible/playbook/deplo.yml"
-                    '''
+                sshagent(['SSHToken']) {
+                    sh """
+                    # Create directory if it doesn't exist
+                    ssh -o StrictHostKeyChecking=no ${K8S_USER}@${K8S_MASTER} "mkdir -p /home/${K8S_USER}/manifest/"
+                    
+                    # Copy manifests
+                    scp -o StrictHostKeyChecking=no manifest/*.yml ${K8S_USER}@${K8S_MASTER}:/home/${K8S_USER}/manifest/
+                    
+                    # Update the image in the deployment and apply
+                    # This replaces the image tag dynamically in your YAML before applying
+                    ssh -o StrictHostKeyChecking=no ${K8S_USER}@${K8S_MASTER} "
+                        cd /home/${K8S_USER}/manifest/
+                        sed -i 's|${DOCKER_IMAGE}:.*|${DOCKER_IMAGE}:${DOCKER_TAG}|g' *.yml
+                        kubectl apply -f .
+                    "
+                    """
                 }
             }
         }
-
+    }
+    
+    post {
+        always {
+            sh 'docker logout'
+            // Clean up workspace to save disk space
+            cleanWs()
+        }
     }
 }
